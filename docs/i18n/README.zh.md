@@ -240,6 +240,7 @@ SongMirror 将会发布`https://music.example.com/oauth/spotify/callback`；在 
 |图片| `ghcr.io/ahnafnafee/songmirror:latest`支持AMD64和ARM64。每个构建版本还带有特定于提交的 `sha-...` 标签； Git 标签（例如 `v1.2.3`）另外发布 `1.2.3`、`1.2` 和 `1`。使用 [容器镜像指南](../docker-image.md) 固定不可变的摘要。 |
 |港口| UI 发布在主机 8888 上（`docker-compose.yml` 中的 `8888:8080` 映射；如果发生冲突，请更改主机端）。 LAN-only — 不要将其端口转发到互联网； UI 尚未进行身份验证。 |
 |坚持| `./data` 在 `playlist_backups/` 下保存凭证、令牌、缓存、歌曲存档和计划的播放列表快照。对其进行备份，以在重建过程中保留您的设置和存档。 |
+|文件所有权| SongMirror 会让 `./data` 只有所有者可读，因为其中保存了令牌和密码。默认情况下容器以 root 运行，因此所有者是 root。在 `.env` 中将 `PUID` 和 `PGID` 设为主机的用户和组 ID（`id -u`、`id -g`），即可改用该用户运行：启动时 `./data` 会交给该用户，你仍可从主机或网络共享打开它。下载功能需要该用户对 `DOWNLOAD_DIR` 有写入权限。 |
 |下载 |将 `DOWNLOAD_DIR` （在 `.env` 或您的 shell 中）设置为您的主机音乐目录（例如 `F:\Torrent\Music`）； compose 将其绑定安装到 `/music`。从Docker，将`JELLYFIN_URL`设置为`http://host.docker.internal:8096`。 |
 |过期会话 |可更新会话将在下一次计划或手动传递时恢复。 TIDAL 网络播放器会话通过捕获的刷新令牌进行更新； Qobuz 和 Apple Music 令牌在被拒绝后仍必须重新粘贴。无需重新启动。 |
 
