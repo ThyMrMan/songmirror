@@ -7,6 +7,7 @@ Approved partner credentials remain a backward-compatible fallback.
 
 import os
 import random
+import re
 import time
 
 import requests
@@ -14,7 +15,7 @@ import requests
 from ...qobuz_web import parse_web_request
 from ..config import REQUEST_TIMEOUT, polite_sleep, required_env
 from ..logs import log_warn
-from ..matching import normalize_text, romanized, track_key
+from ..matching import normalize_text, romanized, search_title, track_key
 from .base import MirrorTarget, TargetAuthError, TargetTransientError
 from .provider_utils import best_candidate, compatible_isrc_candidates, source_playlist_details, title_with_version
 
@@ -30,8 +31,33 @@ def _artist_name(track):
     return artist.get("name") or track.get("performers") or ""
 
 
+_PERFORMER_ROLES = {"MainArtist", "FeaturedArtist"}
+_ROLE_RE = re.compile(r"[A-Z][A-Za-z]*")
+
+
+def _credited_artists(track):
+    """Main and featured artists from Qobuz's ``performers`` credit string.
+
+    The string lists every contributor as ``Name, Role, Role - Name, Role``.
+    ``performer`` only names the lead artist, so a "(feat. X)" guest is
+    visible here alone. Names may contain commas, so only trailing
+    single-word role tokens are peeled off each entry."""
+    names = []
+    for entry in str(track.get("performers") or "").split(" - "):
+        parts = [part.strip() for part in entry.split(",")]
+        roles = set()
+        while len(parts) > 1 and _ROLE_RE.fullmatch(parts[-1]):
+            roles.add(parts.pop())
+        name = ", ".join(parts).strip()
+        if name and roles & _PERFORMER_ROLES and name not in names:
+            names.append(name)
+    return names
+
+
 def _normalized_track(track):
     artist = _artist_name(track)
+    artists = [artist] if artist else []
+    artists += [name for name in _credited_artists(track) if name.casefold() != artist.casefold()]
     duration = track.get("duration")
     album = track.get("album") or {}
     album_image = album.get("image") or {}
@@ -44,7 +70,7 @@ def _normalized_track(track):
         "relationship_id": track.get("playlist_track_id"),
         "name": title_with_version(track.get("title"), track.get("version")),
         "artist": artist,
-        "artists": [artist] if artist else [""],
+        "artists": artists or [""],
         "album": album.get("title"),
         "album_position": track.get("track_number"),
         "duration_ms": int(duration * 1000) if isinstance(duration, (int, float)) else None,
@@ -457,23 +483,36 @@ class QobuzTarget(MirrorTarget):
                 out[track.get("id")] = ids
         return out
 
+    @staticmethod
+    def _search_queries(track):
+        """Search texts to try in order. Qobuz search returns little or nothing
+        for a title carrying "(feat. ...)" or "(Remastered)", so the clean
+        title goes first; the full title and a romanized form are fallbacks."""
+        name = track.get("name", "")
+        primary = (track.get("artists") or [""])[0]
+        queries = []
+        for title in (search_title(name), name):
+            query = f"{title} {primary}".strip()
+            if query and query not in queries:
+                queries.append(query)
+        roman = f"{romanized(search_title(name))} {romanized(primary)}".strip()
+        if roman and all(roman != normalize_text(query) for query in queries):
+            queries.append(roman)
+        return queries
+
     def resolve(self, track, cache):
         if manual := self.manual_resolution(track, cache):
             return manual
         candidates = compatible_isrc_candidates(track, cache)
         if candidates:
-            return best_candidate(track, candidates) or str(candidates[0]["id"]), "isrc"
+            best = best_candidate(track, candidates, all_candidate_artists=True)
+            return best or str(candidates[0]["id"]), "isrc"
         key = track_key(track.get("name", ""), " ".join(track.get("artists") or []))
         if key in cache["search"]:
             return self._cached_id(key, cache), "search"
-        primary = (track.get("artists") or [""])[0]
-        queries = [f"{track.get('name', '')} {primary}".strip()]
-        roman = f"{romanized(track.get('name'))} {romanized(primary)}".strip()
-        if roman and roman != normalize_text(queries[0]):
-            queries.append(roman)
         best = None
-        for query in queries:
-            best = best_candidate(track, self._search(query))
+        for query in self._search_queries(track):
+            best = best_candidate(track, self._search(query), all_candidate_artists=True)
             if best:
                 break
         cache["search"][key] = best
