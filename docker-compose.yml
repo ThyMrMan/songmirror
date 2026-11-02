@@ -21,6 +21,11 @@ services:
       # LAN-only — do NOT port-forward this to the internet (the UI has no login).
       - "8888:8080"
     environment:
+      # Run as this host user instead of root, so ./data stays readable to you
+      # (SongMirror keeps it owner-only). Find the ids with `id -u` / `id -g` on
+      # the host; Unraid is usually 99/100. Leave unset to run as root.
+      PUID: "${PUID:-}"
+      PGID: "${PGID:-}"
       SONGMIRROR_DATA_DIR: /data           # persistent volume for settings, tokens, caches, syncs, links
       SONGMIRROR_ENV_FILE: /data/app.env   # SettingsStore's managed env; wizard saves win over any .env
       SPOTIFY_TOKEN_CACHE: /data/spotify_token_cache
