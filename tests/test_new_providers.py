@@ -904,6 +904,62 @@ def test_qobuz_search_ignores_tracks_the_account_cannot_play():
     assert [track["id"] for track in target._search("Ethereal")] == ["2", "3"]
 
 
+def test_qobuz_reads_main_and_featured_artists_from_credits():
+    from songmirror.engine.targets.qobuz import _normalized_track
+
+    track = _normalized_track({
+        "id": 1, "title": "10 Feet Down", "performer": {"name": "NF"},
+        "performers": "NF, MainArtist - Ruelle, FeaturedArtist - Tommee Profitt, Producer, "
+                      "ComposerLyricist - Tyler, The Creator, MainArtist",
+    })
+
+    assert track["artist"] == "NF"
+    assert track["artists"] == ["NF", "Ruelle", "Tyler, The Creator"]
+
+
+def test_qobuz_matches_a_featured_guest_listed_only_in_credits(monkeypatch):
+    from songmirror.engine.targets import qobuz as qobuz_module
+    from songmirror.engine.targets.qobuz import QobuzTarget
+
+    queries = []
+
+    def request(method, endpoint, params=None):
+        queries.append(params["query"])
+        return {"tracks": {"items": [{
+            "id": 7, "title": "10 Feet Down", "duration": 217, "performer": {"name": "NF"},
+            "performers": "NF, MainArtist - Ruelle, FeaturedArtist",
+        }]}}
+
+    target = QobuzTarget.__new__(QobuzTarget)
+    target._request = request
+    monkeypatch.setattr(qobuz_module, "polite_sleep", lambda _seconds: None)
+    cache = {"isrc": {}, "search": {}, "manual": set()}
+    source = {"name": "10 Feet Down (feat. Ruelle)", "artists": ["NF"], "duration_ms": 217000}
+
+    assert target.resolve(source, cache) == ("7", "search")
+    assert queries == ["10 Feet Down NF"]
+
+
+def test_qobuz_search_tries_the_clean_title_before_the_full_one():
+    from songmirror.engine.targets.qobuz import QobuzTarget
+
+    track = {"name": "House of the Rising Sun (Remastered)", "artists": ["The Animals"]}
+
+    assert QobuzTarget._search_queries(track)[:2] == [
+        "House of the Rising Sun The Animals",
+        "House of the Rising Sun (Remastered) The Animals",
+    ]
+
+
+def test_search_title_keeps_version_words():
+    from songmirror.engine.matching import search_title
+
+    assert search_title("We Won't Be Alone (feat. Laura Brehm)") == "We Won't Be Alone"
+    assert search_title("Kashmir - 1990 Remaster") == "Kashmir"
+    assert search_title("Adrenaline (Deadcrow Remix)") == "Adrenaline (Deadcrow Remix)"
+    assert search_title("(feat. X)") == "(feat. X)"
+
+
 @pytest.mark.parametrize("module_name,class_name", [
     ("songmirror.engine.targets.apple", "AppleMusicTarget"),
 ])

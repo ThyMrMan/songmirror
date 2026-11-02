@@ -175,6 +175,16 @@ def loose_name(name):
     return cleaned or normalize_text(raw) or raw.casefold()
 
 
+def search_title(name):
+    """A title for catalog search text: guest credits and remaster or
+    clean/explicit labels removed, everything else kept as written. Version
+    words such as Remix or Live stay, so search still ranks that version."""
+    cleaned = _without_feature_credits(name)
+    cleaned = BRACKETED_CATALOG_TAG_RE.sub(" ", cleaned)
+    cleaned = TRAILING_CATALOG_TAG_RE.sub(" ", cleaned)
+    return " ".join(cleaned.split()) or str(name or "").strip()
+
+
 def catalog_name(name):
     """A conservative title identity for destination-side duplicate guards.
 

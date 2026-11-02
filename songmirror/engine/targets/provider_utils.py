@@ -56,16 +56,23 @@ def iso_duration_ms(value):
     return round(seconds * 1000)
 
 
-def best_candidate(track, candidates):
-    """Return the id of the highest-scoring acceptable normalized candidate."""
+def best_candidate(track, candidates, *, all_candidate_artists=False):
+    """Return the id of the highest-scoring acceptable normalized candidate.
+
+    With ``all_candidate_artists``, a candidate's full ``artists`` list (main
+    and featured performers) is scored instead of its single display artist,
+    so a source "(feat. X)" credit can be found on the candidate."""
     best_id, best_score = None, -1.0
     for candidate in candidates:
+        candidate_artist = candidate.get("artist", "")
+        if all_candidate_artists and candidate.get("artists"):
+            candidate_artist = candidate["artists"]
         score, acceptable = score_candidate(
             track.get("name", ""),
             track.get("artists") or [track.get("artist", "")],
             track.get("duration_ms"),
             candidate.get("name", ""),
-            candidate.get("artist", ""),
+            candidate_artist,
             candidate.get("duration_ms"),
         )
         if acceptable and score > best_score:
