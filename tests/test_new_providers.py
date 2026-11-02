@@ -856,6 +856,41 @@ def test_qobuz_add_raises_when_every_track_is_refused(monkeypatch):
         target.add({"id": "playlist"}, [str(n) for n in range(8)])
 
 
+def _qobuz_favorites_target(pages, total):
+    from songmirror.engine.targets.qobuz import QobuzTarget
+
+    def request(method, endpoint, params=None):
+        items = pages.get(params["offset"], [])
+        return {"tracks": {"total": total, "items": [{"id": i, "title": f"t{i}"} for i in items]}}
+
+    target = QobuzTarget.__new__(QobuzTarget)
+    target._request = request
+    return target
+
+
+def test_qobuz_favorites_accept_a_total_that_counts_unavailable_tracks():
+    # 155 returned, 156 counted: the short second page is the real end.
+    pages = {0: range(100), 100: range(100, 155)}
+    target = _qobuz_favorites_target(pages, total=156)
+
+    assert len(target.favorite_tracks()) == 155
+
+
+def test_qobuz_favorites_still_fail_when_the_list_stops_after_a_full_page():
+    pages = {0: range(100)}
+    target = _qobuz_favorites_target(pages, total=156)
+
+    with pytest.raises(RuntimeError, match=r"stopped at 100 of 156"):
+        target.favorite_tracks()
+
+
+def test_qobuz_favorites_drop_repeated_tracks_across_pages():
+    pages = {0: range(100), 100: range(99, 150)}
+    target = _qobuz_favorites_target(pages, total=151)
+
+    assert [t["id"] for t in target.favorite_tracks()] == [str(i) for i in range(150)]
+
+
 def test_qobuz_search_ignores_tracks_the_account_cannot_play():
     from songmirror.engine.targets.qobuz import QobuzTarget
 

@@ -318,27 +318,44 @@ class QobuzTarget(MirrorTarget):
                 return tracks
 
     def favorite_tracks(self):
-        tracks, offset = [], 0
+        limit = 100
+        tracks, seen, offset, last_page = [], set(), 0, None
         while True:
             body = self._request(
                 "GET",
                 "favorite/getUserFavorites",
-                params={"type": "tracks", "limit": 100, "offset": offset},
+                params={"type": "tracks", "limit": limit, "offset": offset},
             )
             container = body.get("tracks") or {}
             items = container.get("items") or []
-            tracks.extend(_normalized_track(track) for track in items if track.get("id") is not None)
+            for track in items:
+                track_id = track.get("id")
+                if track_id is not None and str(track_id) not in seen:
+                    seen.add(str(track_id))
+                    tracks.append(_normalized_track(track))
             offset += len(items)
             total = container.get("total")
             if total is not None:
-                if offset >= int(total):
+                total = int(total)
+                if offset >= total:
                     return tracks
                 if not items:
+                    if last_page is not None and 0 < last_page < limit:
+                        # The list ended on a short page, so Qobuz has nothing
+                        # more to send. Its total still counts favorites it no
+                        # longer returns (tracks pulled from the catalog).
+                        log_warn(
+                            f"Qobuz counts {total} favorite tracks but returns {offset}; "
+                            f"{total - offset} are no longer available and were skipped",
+                            tag=self.tag,
+                        )
+                        return tracks
                     raise RuntimeError(
-                        f"Qobuz favorites read incomplete: stopped at {offset} of {int(total)} tracks"
+                        f"Qobuz favorites read incomplete: stopped at {offset} of {total} tracks"
                     )
-            elif not items or len(items) < 100:
+            elif not items or len(items) < limit:
                 return tracks
+            last_page = len(items)
 
     def add_favorite_tracks(self, target_ids):
         for target_id in target_ids:
